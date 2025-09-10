@@ -44,6 +44,8 @@ export class CustomScrollView extends Component<CustomScrollViewProps> {
     private previousDate?: Date = undefined;
     private itemMap: Map<string, MapItem> = new Map();
     private styles: CustomStyle;
+    private expectedItemIds: Set<string> = new Set();
+    private didScrollInitially = false;
 
     constructor(props: CustomScrollViewProps) {
         super(props);
@@ -71,8 +73,10 @@ export class CustomScrollView extends Component<CustomScrollViewProps> {
                 }
                 style={this.styles.container}
                 horizontal={this.props.scrollDirection === "horizontal"}
+                onLayout={() => {
+                    this.updateScrollPosition();
+                }}
                 onContentSizeChange={() => {
-                    // console.log("cs layout");
                     this.updateScrollPosition();
                 }}
             >
@@ -83,12 +87,22 @@ export class CustomScrollView extends Component<CustomScrollViewProps> {
         );
     }
 
+    componentDidUpdate(_prevProps: CustomScrollViewProps): void {
+        this.updateScrollPosition();
+    }
+
+    componentDidMount(): void {
+        this.updateScrollPosition();
+    }
+
     updateScrollPosition(): void {
+        // console.log("updateScrollPosition");
         const { triggerAttr } = this.props;
-        if (triggerAttr && triggerAttr.status === ValueStatus.Available) {
+        if (triggerAttr && triggerAttr.status === ValueStatus.Available && this.itemMap.size > 0) {
             if (!this.previousDate || triggerAttr.value?.getTime() !== this.previousDate?.getTime()) {
                 this.previousDate = triggerAttr.value;
                 setTimeout(() => {
+                    // console.log("updateScrollPosition - update");
                     let scrollToX = 0;
                     let scrollToY = 0;
                     const itemId = this.getScrollToId();
@@ -130,26 +144,31 @@ export class CustomScrollView extends Component<CustomScrollViewProps> {
 
     renderDataSourceItems(): ReactNode[] {
         const { items, dsContent } = this.props;
+        this.expectedItemIds.clear();
 
         if (!items || !dsContent) {
             return [];
         }
 
-        return items.map(item => (
-            <ContentItem
-                key={item.id}
-                itemId={item.id}
-                itemType="item"
-                testID={this.props.testID}
-                content={dsContent.get(item)}
-                style={this.styles.item}
-                onLayout={this.onLayout}
-            />
-        ));
+        return items.map(item => {
+            this.expectedItemIds.add(item.id);
+            return (
+                <ContentItem
+                    key={item.id}
+                    itemId={item.id}
+                    itemType="item"
+                    testID={this.props.testID}
+                    content={dsContent.get(item)}
+                    style={this.styles.item}
+                    onLayout={this.onLayout}
+                />
+            );
+        });
     }
 
     renderSections(): ReactNode[] {
         const { sectionContainerList } = this.props;
+        this.expectedItemIds.clear();
 
         if (!sectionContainerList) {
             return [];
@@ -157,15 +176,18 @@ export class CustomScrollView extends Component<CustomScrollViewProps> {
 
         return sectionContainerList.map((sectionItem, index) => {
             const { sectionContainerID } = sectionItem;
-            if (!sectionContainerID || sectionContainerID.status !== ValueStatus.Available) {
+            if (
+                !sectionContainerID ||
+                sectionContainerID.status !== ValueStatus.Available ||
+                !sectionContainerID.value
+            ) {
+                console.error("Native Custom Scroll View: Invalid section at index " + index);
                 return null;
             }
-            if (!sectionContainerID.value) {
-                console.error("Native Custom Scroll View: Section with index " + index + " has no section ID.");
-                return null;
-            }
-            // Force into a string.
+
             const itemId = "" + sectionItem.sectionContainerID.value;
+            this.expectedItemIds.add(itemId);
+
             return (
                 <ContentItem
                     key={itemId}
@@ -197,5 +219,12 @@ export class CustomScrollView extends Component<CustomScrollViewProps> {
 
     onLayout(itemId: string, layout: LayoutRectangle): void {
         this.itemMap.set(itemId, { layout });
+
+        const allReady = [...this.expectedItemIds].every(id => this.itemMap.has(id));
+        if (allReady && !this.didScrollInitially) {
+            this.didScrollInitially = true;
+            console.log("onLayout - didScrollInitially");
+            setTimeout(() => this.updateScrollPosition(), 0);
+        }
     }
 }
